@@ -32,10 +32,9 @@ except:
 gc = gspread.authorize(creds)
 
 # Now use gc to access Sheets
-sheet = gc.open("DRC_Compiled").sheet1
-st.write(sheet.get_all_records())
 
-spreadsheet = gc.open(sheet)
+
+spreadsheet = gc.open_by_key("1DEsQQMwkcGaHIUpirSLoFsM0HSSq1nlYB9PynDW-txQ")
 
 # Access the "Primary Table" worksheet
 worksheet = spreadsheet.worksheet("Main")
@@ -48,35 +47,6 @@ df = pd.DataFrame(data)
 worksheet_monthly = spreadsheet.worksheet("pdftosheet")
 data_monthly = worksheet_monthly.get_all_records()
 df_monthly = pd.DataFrame(data_monthly)
-
-# Data Preparation
-df = pd.DataFrame(worksheet.get_all_records())
-
-# Convert numeric columns
-numeric_cols = ['SUM of Payable Days', 'Updated Absent Days', 'Extension Days']
-for col in numeric_cols:
-    df[col] = pd.to_numeric(df[col], errors='coerce')
-
-# Fix date parsing
-df['Date'] = pd.to_datetime(
-    df['Date'],
-    format='%Y-%m-%d',  # Adjust format as needed
-    errors='coerce'
-)
-
-# Data Verification
-st.write("Data Verification:", df.head())
-
-# Create accurate visualization
-fig = px.bar(
-    df.groupby('Name')[numeric_cols].sum().reset_index(),
-    x='Name',
-    y=numeric_cols,
-    barmode='group',
-    title="Accurate Attendance Visualization"
-)
-fig.update_layout(yaxis_title="Days")
-st.plotly_chart(fig)
 
 # Ensure numeric columns are numeric
 df['SUM of Payable Days'] = pd.to_numeric(df['SUM of Payable Days'], errors='coerce')
@@ -293,28 +263,31 @@ if page_selection == "Main Dashboard":
 
 
 
-
-    # Additional Notes
-    st.write("""
-    - **Instructions**: The table above allows for filtering, sorting, and resizing columns directly.
-    """)
-
-    # For the Main Dashboard Table
+    # Table with Excel-Like Filters (Using AgGrid)
+    st.subheader("Detailed Table")
     gb = GridOptionsBuilder.from_dataframe(filtered_df)
+    gb.configure_grid_options(domLayout='normal')  # Enable normal scrolling instead of pagination
+    gb.configure_side_bar()  # Add a sidebar to configure columns and filters
     gb.configure_default_column(
-        filterable=True,  # Enable filtering
-        sortable=True,    # Enable sorting
-        resizable=True    # Allow column resizing
+        filter=True,  # Enable filters
+        sortable=True,  # Enable sorting
+        resizable=True,  # Allow column resizing
+        editable=False  # Make the table non-editable
     )
+    
     grid_options = gb.build()
 
     AgGrid(
         filtered_df,
         gridOptions=grid_options,
-        height=400,  # Fixed height (optional)
-        fit_columns_on_grid_load=True,  # Auto-fit columns
-        update_mode=GridUpdateMode.SELECTION_CHANGED,  # Basic interactivity
+        enable_enterprise_modules=True,  # Enable advanced features
+        theme="streamlit"  # Use the Streamlit theme for AgGrid
     )
+
+    # Additional Notes
+    st.write("""
+    - **Instructions**: The table above allows for filtering, sorting, and resizing columns directly.
+    """)
 
 if page_selection == "Monthly Data":
     # Monthly Data Section
@@ -411,149 +384,178 @@ if page_selection == "Monthly Data":
     fig_monthly.for_each_trace(lambda t: t.update(name='Payable Days' if 'Payable Days' in t.name else 'Absent Days'))
     st.plotly_chart(fig_monthly, use_container_width=True)
 
+    # --- Detailed Table (Existing Code) ---
+    st.subheader("Detailed Monthly Data Table")
     gb_monthly = GridOptionsBuilder.from_dataframe(filtered_monthly_df)
-    gb_monthly.configure_default_column(
-        filterable=True,
-        sortable=True,
-        resizable=True
-    )
+    gb_monthly.configure_grid_options(domLayout='normal')
+    gb_monthly.configure_side_bar()
+    gb_monthly.configure_default_column(filter=True, sortable=True, resizable=True, editable=False)
     grid_options_monthly = gb_monthly.build()
+    AgGrid(filtered_monthly_df, gridOptions=grid_options_monthly, enable_enterprise_modules=True, theme="streamlit")
 
-    AgGrid(
-        filtered_monthly_df,
-        gridOptions=grid_options_monthly,
-        height=400,
-        fit_columns_on_grid_load=True,
-    )
-
+# Add this new condition for the Daily Dashboard
 elif page_selection == "Daily Dashboard":
     st.title("Daily Attendance Dashboard")
     
     # Open the daily attendance Google Sheet
-    daily_sheet_key = "1J2XQPhOc2OqDcjjg_9-WLA7RbtveaLI5ddK91I6cwlw"  # Replace with your actual key
-    try:
-        daily_spreadsheet = gc.open_by_key(daily_sheet_key)
-        
-        # Get all worksheet names except "Sheet1"
-        worksheets = daily_spreadsheet.worksheets()
-        available_sheets = [ws.title for ws in worksheets if ws.title != "Sheet1"]
-        
-        if not available_sheets:
-            st.error("No valid worksheets found in the daily attendance sheet.")
-            st.stop()
-            
-        # Sidebar filters
-        st.sidebar.title("Daily Data Filters")
-        selected_sheet = st.sidebar.selectbox("Select Month Sheet", available_sheets)
-        
-        # Load the selected worksheet
-        daily_worksheet = daily_spreadsheet.worksheet(selected_sheet)
-        daily_data = daily_worksheet.get_all_records()
-        daily_df = pd.DataFrame(daily_data)
-        
-        # Convert date column to datetime for filtering
-        if 'Date' in daily_df.columns:
-            daily_df['Date'] = pd.to_datetime(daily_df['Date'], errors='coerce', dayfirst=True)
-            
-            # Date range selector
-            min_date = daily_df['Date'].min()
-            max_date = daily_df['Date'].max()
-            
-            date_range = st.sidebar.date_input(
-                "Select Date Range",
-                value=[min_date, max_date],
-                min_value=min_date,
-                max_value=max_date
-            )
-            
-            # Filter by date range
-            if len(date_range) == 2:
-                start_date, end_date = pd.to_datetime(date_range[0]), pd.to_datetime(date_range[1])
-                daily_df = daily_df[(daily_df['Date'] >= start_date) & (daily_df['Date'] <= end_date)]
-        
-        # Staff name filter
-        staff_names = ["All"] + sorted(daily_df['Staff Name'].dropna().unique().tolist())
-        selected_staff = st.sidebar.selectbox("Select Staff Member", staff_names)
-        
-        if selected_staff != "All":
-            daily_df = daily_df[daily_df['Staff Name'] == selected_staff]
-        
-        # Clean and process Hours Worked column
-        if 'Hours Worked' in daily_df.columns:  # Note: Fixing typo from original code
-            daily_df['Hours Worked'] = daily_df['Hours Worked'].apply(
-                lambda x: pd.to_numeric(x, errors='coerce') or 0
-            )
-        
-        # Display KPIs
-        st.subheader("Daily Attendance Summary")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            total_records = len(daily_df)
-            st.metric("Total Records", total_records)
-        
-        with col2:
-            if 'Hours Worked' in daily_df.columns:
-                avg_hours = daily_df['Hours Worked'].mean()
-                st.metric("Average Hours Worked", f"{avg_hours:.2f} hours")
-        
-        # Display the data table
-        st.subheader(f"Daily Attendance Data - {selected_sheet}")
-        
-        # Configure AgGrid for the daily data
-        try:
-            gb_daily = GridOptionsBuilder.from_dataframe(daily_df)
-            gb_daily.configure_default_column(
-                filterable=True,
-                sortable=True,
-                resizable=True
-            )
-            grid_options_daily = gb_daily.build()
-            
-            AgGrid(
-                daily_df,
-                gridOptions=grid_options_daily,
-                height=500,
-                width='100%',
-                fit_columns_on_grid_load=True,
-                update_mode=GridUpdateMode.SELECTION_CHANGED
-            )
-        except Exception as e:
-            st.error(f"Error displaying table: {str(e)}")
-            st.dataframe(daily_df)  # Fallback to simple dataframe
-        
-        # Visualization: Attendance Status Count
-        if 'Attendance' in daily_df.columns:
-            st.subheader("Attendance Status Distribution")
-            status_counts = daily_df['Attendance'].value_counts().reset_index()
-            status_counts.columns = ['Status', 'Count']
-            
-            fig = px.pie(
-                status_counts,
-                names='Status',
-                values='Count',
-                title="Attendance Status Distribution",
-                color_discrete_sequence=px.colors.qualitative.Pastel
-            )
-            st.plotly_chart(fig, use_container_width=True)
-        
-        # Visualization: Hours Worked Trend
-        if 'Hours Worked' in daily_df.columns and 'Date' in daily_df.columns:
-            st.subheader("Hours Worked Trend Over Time")
-            try:
-                fig = px.line(
-                    daily_df,
-                    x='Date',
-                    y='Hours Worked',
-                    color='Staff Name' if selected_staff == "All" else None,
-                    title="Daily Hours Worked Trend",
-                    markers=True,
-                    labels={'Hours Worked': 'Hours Worked'}
-                )
-                fig.update_yaxes(rangemode="tozero")
-                st.plotly_chart(fig, use_container_width=True)
-            except Exception as e:
-                st.warning(f"Could not display hours worked trend: {str(e)}")
+    daily_sheet_key = "1J2XQPhOc2OqDcjjg_9-WLA7RbtveaLI5ddK91I6cwlw"
+    daily_spreadsheet = gc.open_by_key(daily_sheet_key)
     
-    except Exception as e:
-        st.error(f"Failed to load daily attendance data: {str(e)}")
+    # Get all worksheet names except "Sheet1"
+    worksheets = daily_spreadsheet.worksheets()
+    available_sheets = [ws.title for ws in worksheets if ws.title != "Sheet1"]
+    
+    # Sidebar filters
+    st.sidebar.title("Daily Data Filters")
+    selected_sheet = st.sidebar.selectbox("Select Month Sheet", available_sheets)
+    
+    # Load the selected worksheet
+    daily_worksheet = daily_spreadsheet.worksheet(selected_sheet)
+    daily_data = daily_worksheet.get_all_records()
+    daily_df = pd.DataFrame(daily_data)
+    
+    # Convert date column to datetime for filtering
+    if 'Date' in daily_df.columns:
+        daily_df['Date'] = pd.to_datetime(daily_df['Date'], errors='coerce', dayfirst=True)
+        
+        # Date range selector
+        min_date = daily_df['Date'].min()
+        max_date = daily_df['Date'].max()
+        date_range = st.sidebar.date_input(
+            "Select Date Range",
+            value=[min_date, max_date],
+            min_value=min_date,
+            max_value=max_date
+        )
+        
+        # Filter by date range
+        if len(date_range) == 2:
+            start_date, end_date = pd.to_datetime(date_range[0]), pd.to_datetime(date_range[1])
+            daily_df = daily_df[(daily_df['Date'] >= start_date) & (daily_df['Date'] <= end_date)]
+    
+    # Staff name filter
+    staff_names = ["All"] + sorted(daily_df['Staff Name'].unique().tolist())
+    selected_staff = st.sidebar.selectbox("Select Staff Member", staff_names)
+    
+    if selected_staff != "All":
+        daily_df = daily_df[daily_df['Staff Name'] == selected_staff]
+    
+    # Clean and process Hours Worked column - convert to numeric hours
+    if 'Hours Worked' in daily_df.columns:
+        def convert_to_hours(hours_str):
+            if pd.isna(hours_str):
+                return 0.0
+            
+            # If it's already a number, return it directly
+            try:
+                return float(hours_str)
+            except:
+                pass
+                
+            # Handle time strings (HH:MM:SS)
+            if isinstance(hours_str, str):
+                # Remove any extra characters or multiple time entries
+                clean_str = hours_str.split()[0]  # Take first part if multiple times
+                
+                # Handle HH:MM:SS format
+                if clean_str.count(':') == 2:
+                    try:
+                        h, m, s = map(float, clean_str.split(':'))
+                        return h + m/60 + s/3600
+                    except:
+                        pass
+                
+                # Handle HH:MM format
+                elif clean_str.count(':') == 1:
+                    try:
+                        h, m = map(float, clean_str.split(':'))
+                        return h + m/60
+                    except:
+                        pass
+            
+            # If all else fails, return 0
+            return 0.0
+        
+        daily_df['Hours Worked'] = daily_df['Hours Worked'].apply(convert_to_hours)
+        daily_df['Hours Worked'] = pd.to_numeric(daily_df['Hours Worked'], errors='coerce').fillna(0)
+    
+    # Display KPIs
+    st.subheader("Daily Attendance Summary")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        total_records = len(daily_df)
+        st.metric("Total Records", total_records)
+    
+    with col2:
+        if 'Hours Worked' in daily_df.columns:
+            avg_hours = daily_df['Hours Worked'].mean()
+            st.metric("Average Hours Worked", f"{avg_hours:.2f} hours")
+    
+    # Display the data table
+    st.subheader(f"Daily Attendance Data - {selected_sheet}")
+    
+    # Configure AgGrid for the daily data
+    display_df = daily_df.copy()
+    
+    # Format Hours Worked for display (optional)
+    if 'Hours Worked' in display_df.columns:
+        display_df['Hours Worked Display'] = display_df['Hours Worked'].apply(
+            lambda x: f"{int(x)}:{int((x % 1) * 60):02d}" if pd.notna(x) else "--"
+        )
+    
+    gb_daily = GridOptionsBuilder.from_dataframe(display_df)
+    gb_daily.configure_grid_options(domLayout='normal')
+    gb_daily.configure_side_bar()
+    gb_daily.configure_default_column(
+        filter=True, 
+        sortable=True, 
+        resizable=True, 
+        editable=False
+    )
+    grid_options_daily = gb_daily.build()
+    
+    AgGrid(
+        display_df,
+        gridOptions=grid_options_daily,
+        enable_enterprise_modules=True,
+        theme="streamlit",
+        height=500,
+        width='100%'
+    )
+    
+    # Visualization: Attendance Status Count
+    if 'Attendance' in daily_df.columns:
+        st.subheader("Attendance Status Distribution")
+        status_counts = daily_df['Attendance'].value_counts().reset_index()
+        status_counts.columns = ['Status', 'Count']
+        
+        fig = px.pie(
+            status_counts,
+            names='Status',
+            values='Count',
+            title="Attendance Status Distribution",
+            color_discrete_sequence=px.colors.qualitative.Pastel
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    
+    # Visualization: Hours Worked Trend
+    if 'Hours Worked' in daily_df.columns and 'Date' in daily_df.columns:
+        st.subheader("Hours Worked Trend Over Time")
+        try:
+            fig = px.line(
+                daily_df,
+                x='Date',
+                y='Hours Worked',
+                color='Staff Name' if selected_staff == "All" else None,
+                title="Daily Hours Worked Trend",
+                markers=True,
+                labels={'Hours Worked': 'Hours Worked'}
+            )
+            
+            # Set y-axis range to start from 0
+            fig.update_yaxes(rangemode="tozero")
+            
+            st.plotly_chart(fig, use_container_width=True)
+        except Exception as e:
+            st.warning(f"Could not display hours worked trend: {str(e)}")
