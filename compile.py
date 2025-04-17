@@ -214,13 +214,16 @@ if page_selection == "Main Dashboard":
     with col1:
         # Pie Chart for Transfer Case
         st.subheader("Transfer Case Distribution")
-        transfer_counts = filtered_df[filtered_df['Transfer case '].isin(["Yes", "No"])]
-        transfer_counts = transfer_counts['Transfer case '].value_counts().reset_index()
-        transfer_counts.columns = ['Transfer case ', 'Count']
+        # For your transfer case pie chart, modify to:
+        transfer_counts = filtered_df['Transfer case '].value_counts().reset_index()
+        transfer_counts.columns = ['Transfer case', 'Count']  # Fixed column name (removed space)
+        
+        # Ensure we only have "Yes" and "No" values
+        transfer_counts = transfer_counts[transfer_counts['Transfer case'].isin(['Yes', 'No'])]
         
         fig_pie = px.pie(
             transfer_counts,
-            names='Transfer case ',
+            names='Transfer case',
             values='Count',
             title="Transfer Case Distribution",
             hole=0.4,
